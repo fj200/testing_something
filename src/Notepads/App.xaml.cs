@@ -1,13 +1,15 @@
-﻿namespace Notepads
+﻿// ---------------------------------------------------------------------------------------------
+//  Copyright (c) 2019-2024, Jiaqi (0x7c13) Liu. All rights reserved.
+//  See LICENSE file in the project root for license information.
+// ---------------------------------------------------------------------------------------------
+
+namespace Notepads
 {
     using System;
     using System.Collections.Generic;
     using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
-    using Microsoft.AppCenter;
-    using Microsoft.AppCenter.Analytics;
-    using Microsoft.AppCenter.Crashes;
     using Microsoft.Toolkit.Uwp.Helpers;
     using Notepads.Services;
     using Notepads.Settings;
@@ -16,40 +18,23 @@
     using Windows.ApplicationModel.Activation;
     using Windows.ApplicationModel.Core;
     using Windows.ApplicationModel.DataTransfer;
+    using Windows.ApplicationModel.Resources.Core;
     using Windows.UI;
     using Windows.UI.ViewManagement;
     using Windows.UI.Xaml;
     using Windows.UI.Xaml.Controls;
     using Windows.UI.Xaml.Navigation;
 
-    sealed partial class App : Application
+    public sealed partial class App : Application
     {
         public static string ApplicationName = "Notepads";
 
-        public static Guid Id { get; } = Guid.NewGuid();
+        public static Guid InstanceId { get; } = Guid.NewGuid();
 
-        public static event EventHandler<bool> OnInstanceTypeChanged;
-
-        private static bool _isPrimaryInstance = false;
-        public static bool IsPrimaryInstance
-        {
-            get => _isPrimaryInstance;
-            set
-            {
-                if (value != _isPrimaryInstance)
-                {
-                    _isPrimaryInstance = value;
-                    OnInstanceTypeChanged?.Invoke(null, value);
-                }
-            }
-        }
-
+        public static bool IsPrimaryInstance = false;
         public static bool IsGameBarWidget = false;
 
-        // Notepads GitHub CD workflow will swap null with production value getting from Github Secrets
-        private const string AppCenterSecret = null;
-
-        private static Mutex InstanceHandlerMutex = null;
+        public static Mutex InstanceHandlerMutex { get; set; }
 
         /// <summary>
         /// Initializes the singleton application object.  This is the first line of authored code
@@ -60,10 +45,20 @@
             UnhandledException += OnUnhandledException;
             TaskScheduler.UnobservedTaskException += OnUnobservedException;
 
-            var services = new Type[] { typeof(Crashes), typeof(Analytics) };
-            AppCenter.Start(AppCenterSecret, services);
+            InstanceHandlerMutex = new Mutex(true, App.ApplicationName, out bool isNew);
+            if (isNew)
+            {
+                IsPrimaryInstance = true;
+                ApplicationSettingsStore.Write(SettingsKey.ActiveInstanceIdStr, null);
+            }
+            else
+            {
+                InstanceHandlerMutex.Close();
+            }
 
-            ApplicationSettingsStore.Write(SettingsKey.ActiveInstanceIdStr, App.Id.ToString());
+            LoggingService.LogInfo($"[{nameof(App)}] Started: Instance = {InstanceId} IsPrimaryInstance: {IsPrimaryInstance} IsGameBarWidget: {IsGameBarWidget}.");
+
+            ApplicationSettingsStore.Write(SettingsKey.ActiveInstanceIdStr, App.InstanceId.ToString());
 
             InitializeComponent();
 
@@ -78,7 +73,6 @@
         protected override async void OnLaunched(LaunchActivatedEventArgs e)
         {
             await ActivateAsync(e);
-            base.OnLaunched(e);
         }
 
         protected override async void OnFileActivated(FileActivatedEventArgs args)
@@ -95,11 +89,6 @@
 
         private async Task ActivateAsync(IActivatedEventArgs e)
         {
-            if (!(e is LaunchActivatedEventArgs args && args.PrelaunchActivated))
-            {
-                InitializeInstance();
-            }
-
             bool rootFrameCreated = false;
 
             if (!(Window.Current.Content is Frame rootFrame))
@@ -114,8 +103,8 @@
 
             var appLaunchSettings = new Dictionary<string, string>()
             {
-                { "OSArchitecture", SystemInformation.OperatingSystemArchitecture.ToString() },
-                { "OSVersion", $"{SystemInformation.OperatingSystemVersion.Major}.{SystemInformation.OperatingSystemVersion.Minor}.{SystemInformation.OperatingSystemVersion.Build}" },
+                { "OSArchitecture", SystemInformation.Instance.OperatingSystemArchitecture.ToString() },
+                { "OSVersion", $"{SystemInformation.Instance.OperatingSystemVersion.Major}.{SystemInformation.Instance.OperatingSystemVersion.Minor}.{SystemInformation.Instance.OperatingSystemVersion.Build}" },
                 { "UseWindowsTheme", ThemeSettingsService.UseWindowsTheme.ToString() },
                 { "ThemeMode", ThemeSettingsService.ThemeMode.ToString() },
                 { "UseWindowsAccentColor", ThemeSettingsService.UseWindowsAccentColor.ToString() },
@@ -126,11 +115,12 @@
                 { "IsGameBarWidget", IsGameBarWidget.ToString() },
                 { "AlwaysOpenNewWindow", AppSettingsService.AlwaysOpenNewWindow.ToString() },
                 { "IsHighlightMisspelledWordsEnabled", AppSettingsService.IsHighlightMisspelledWordsEnabled.ToString() },
-                { "IsSmartCopyEnabled", AppSettingsService.IsSmartCopyEnabled.ToString() }
+                { "IsSmartCopyEnabled", AppSettingsService.IsSmartCopyEnabled.ToString() },
+                { "ExitWhenLastTabClosed", AppSettingsService.ExitWhenLastTabClosed.ToString() },
             };
 
             LoggingService.LogInfo($"[{nameof(App)}] Launch settings: \n{string.Join("\n", appLaunchSettings.Select(x => x.Key + "=" + x.Value).ToArray())}.");
-            Analytics.TrackEvent("AppLaunch_Settings", appLaunchSettings);
+            AnalyticsService.TrackEvent("AppLaunch_Settings", appLaunchSettings);
 
             var appLaunchEditorSettings = new Dictionary<string, string>()
             {
@@ -148,7 +138,7 @@
             };
 
             LoggingService.LogInfo($"[{nameof(App)}] Editor settings: \n{string.Join("\n", appLaunchEditorSettings.Select(x => x.Key + "=" + x.Value).ToArray())}.");
-            Analytics.TrackEvent("AppLaunch_Editor_Settings", appLaunchEditorSettings);
+            AnalyticsService.TrackEvent("AppLaunch_Editor_Settings", appLaunchEditorSettings);
 
             try
             {
@@ -161,9 +151,22 @@
                     { "Message", ex?.Message },
                     { "Exception", ex?.ToString() },
                 };
-                Analytics.TrackEvent("AppFailedToActivate", diagnosticInfo);
-                Crashes.TrackError(ex, diagnosticInfo);
+                AnalyticsService.TrackEvent("AppFailedToActivate", diagnosticInfo);
+                AnalyticsService.TrackError(ex, diagnosticInfo);
                 throw;
+            }
+
+            try
+            {
+                if (Windows.Foundation.Metadata.ApiInformation.IsMethodPresent("Windows.ApplicationModel.Core.CoreApplication", "EnablePrelaunch"))
+                {
+                    // Only enable prelaunch when AlwaysOpenNewWindow is set to false
+                    CoreApplication.EnablePrelaunch(!AppSettingsService.AlwaysOpenNewWindow);
+                }
+            }
+            catch (Exception)
+            {
+                // Best efforts
             }
 
             if (rootFrameCreated)
@@ -176,11 +179,21 @@
         private Frame CreateRootFrame(IActivatedEventArgs e)
         {
             Frame rootFrame = new Frame();
+
+            var flowDirectionSetting = ResourceContext.GetForCurrentView().QualifierValues["LayoutDirection"];
+            if (flowDirectionSetting == "RTL" || flowDirectionSetting == "TTBRTL")
+            {
+                rootFrame.FlowDirection = FlowDirection.RightToLeft;
+            }
+            else
+            {
+                rootFrame.FlowDirection = FlowDirection.LeftToRight;
+            }
             rootFrame.NavigationFailed += OnNavigationFailed;
 
             if (e.PreviousExecutionState == ApplicationExecutionState.Terminated)
             {
-                //TODO: Load state from previously suspended application
+                // TODO: Load state from previously suspended application
             }
 
             return rootFrame;
@@ -195,7 +208,7 @@
         {
             var exception = new Exception($"[{nameof(App)}] Failed to load Page: {e.SourcePageType.FullName} Exception: {e.Exception.Message}");
             LoggingService.LogException(exception);
-            Analytics.TrackEvent("FailedToLoadPage", new Dictionary<string, string>()
+            AnalyticsService.TrackEvent("FailedToLoadPage", new Dictionary<string, string>()
             {
                 { "Page", e.SourcePageType.FullName },
                 { "Exception", e.Exception.Message }
@@ -209,10 +222,10 @@
         /// of memory still intact.
         /// </summary>
         /// <param name="sender">The source of the suspend request.</param>
-        /// <param name="e">Details about the suspend request.</param>
-        private void OnSuspending(object sender, SuspendingEventArgs e)
+        /// <param name="args">Details about the suspend request.</param>
+        private void OnSuspending(object sender, SuspendingEventArgs args)
         {
-            var deferral = e.SuspendingOperation.GetDeferral();
+            var deferral = args.SuspendingOperation.GetDeferral();
 
             try
             {
@@ -224,8 +237,10 @@
             {
                 // Best efforts
             }
-
-            deferral.Complete();
+            finally
+            {
+                deferral.Complete();
+            }
         }
 
         // Occurs when an exception is not handled on the UI thread.
@@ -237,24 +252,17 @@
             {
                 { "Message", e.Message },
                 { "Exception", e.Exception?.ToString() },
-                { "Culture", SystemInformation.Culture.EnglishName },
-                { "AvailableMemory", SystemInformation.AvailableMemory.ToString("F0") },
-                { "FirstUseTimeUTC", SystemInformation.FirstUseTime.ToUniversalTime().ToString("MM/dd/yyyy HH:mm:ss") },
-                { "OSArchitecture", SystemInformation.OperatingSystemArchitecture.ToString() },
-                { "OSVersion", SystemInformation.OperatingSystemVersion.ToString() },
+                { "Culture", SystemInformation.Instance.Culture.EnglishName },
+                { "AvailableMemory", SystemInformation.Instance.AvailableMemory.ToString("F0") },
+                { "FirstUseTimeUTC", SystemInformation.Instance.FirstUseTime.ToUniversalTime().ToString("MM/dd/yyyy HH:mm:ss") },
+                { "OSArchitecture", SystemInformation.Instance.OperatingSystemArchitecture.ToString() },
+                { "OSVersion", SystemInformation.Instance.OperatingSystemVersion.ToString() },
                 { "IsShadowWindow", (!IsPrimaryInstance && !IsGameBarWidget).ToString() },
                 { "IsGameBarWidget", IsGameBarWidget.ToString() }
             };
 
-            var attachment = ErrorAttachmentLog.AttachmentWithText(
-                $"Exception: {e.Exception}, " +
-                $"Message: {e.Message}, " +
-                $"InnerException: {e.Exception?.InnerException}, " +
-                $"InnerExceptionMessage: {e.Exception?.InnerException?.Message}",
-                "UnhandledException");
-
-            Analytics.TrackEvent("OnUnhandledException", diagnosticInfo);
-            Crashes.TrackError(e.Exception, diagnosticInfo, attachment);
+            AnalyticsService.TrackEvent("OnUnhandledException", diagnosticInfo);
+            AnalyticsService.TrackError(e.Exception, diagnosticInfo);
 
             // suppress and handle it manually.
             e.Handled = true;
@@ -274,15 +282,8 @@
                 { "InnerExceptionMessage", e.Exception?.InnerException?.Message }
             };
 
-            var attachment = ErrorAttachmentLog.AttachmentWithText(
-                $"Exception: {e.Exception}, " +
-                $"Message: {e.Exception?.Message}, " +
-                $"InnerException: {e.Exception?.InnerException}, " +
-                $"InnerExceptionMessage: {e.Exception?.InnerException?.Message}",
-                "UnobservedException");
-
-            Analytics.TrackEvent("OnUnobservedException", diagnosticInfo);
-            Crashes.TrackError(e.Exception, diagnosticInfo, attachment);
+            AnalyticsService.TrackEvent("OnUnobservedException", diagnosticInfo);
+            AnalyticsService.TrackError(e.Exception, diagnosticInfo);
 
             // suppress and handle it manually.
             e.SetObserved();
@@ -299,34 +300,6 @@
             }
         }
 
-        public static void InitializeInstance()
-        {
-            if (InstanceHandlerMutex == null)
-            {
-                InstanceHandlerMutex = new Mutex(true, App.ApplicationName, out bool createdNew);
-
-                if (createdNew)
-                {
-                    IsPrimaryInstance = true;
-                    ApplicationSettingsStore.Write(SettingsKey.ActiveInstanceIdStr, null);
-                }
-                else
-                {
-                    InstanceHandlerMutex?.Close();
-                }
-
-                LoggingService.LogInfo(
-                    $"[{nameof(App)}] Started: Instance = {Id} " +
-                    $"IsPrimaryInstance: {IsPrimaryInstance} " +
-                    $"IsGameBarWidget: {IsGameBarWidget}.");
-            }
-        }
-
-        public static void Dispose()
-        {
-            InstanceHandlerMutex?.Dispose();
-        }
-
         //private static void UpdateAppVersion()
         //{
         //    var packageVer = Package.Current.Id.Version;
@@ -340,11 +313,11 @@
         //    }
         //}
 
-        //private static async Task UpdateJumpList()
+        //private static async Task UpdateJumpListAsync()
         //{
         //    if (JumpListService.IsJumpListOutOfDate)
         //    {
-        //        if (await JumpListService.UpdateJumpList())
+        //        if (await JumpListService.UpdateJumpListAsync())
         //        {
         //            JumpListService.IsJumpListOutOfDate = false;
         //        }

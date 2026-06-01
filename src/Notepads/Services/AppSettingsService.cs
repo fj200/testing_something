@@ -1,4 +1,9 @@
-﻿namespace Notepads.Services
+﻿// ---------------------------------------------------------------------------------------------
+//  Copyright (c) 2019-2024, Jiaqi (0x7c13) Liu. All rights reserved.
+//  See LICENSE file in the project root for license information.
+// ---------------------------------------------------------------------------------------------
+
+namespace Notepads.Services
 {
     using System;
     using System.Text;
@@ -20,7 +25,6 @@
         public static event EventHandler<Encoding> OnDefaultEncodingChanged;
         public static event EventHandler<int> OnDefaultTabIndentsChanged;
         public static event EventHandler<bool> OnStatusBarVisibilityChanged;
-        public static event EventHandler<bool> OnSessionBackupAndRestoreOptionForInstanceChanged;
         public static event EventHandler<bool> OnSessionBackupAndRestoreOptionChanged;
         public static event EventHandler<bool> OnHighlightMisspelledWordsChanged;
 
@@ -248,6 +252,18 @@
             }
         }
 
+        private static bool _exitWhenLastTabClosed;
+
+        public static bool ExitWhenLastTabClosed
+        {
+            get => _exitWhenLastTabClosed;
+            set
+            {
+                _exitWhenLastTabClosed = value;
+                ApplicationSettingsStore.Write(SettingsKey.ExitWhenLastTabClosed, value);
+            }
+        }
+
         private static bool _alwaysOpenNewWindow;
 
         public static bool AlwaysOpenNewWindow
@@ -312,6 +328,8 @@
             InitializeSessionSnapshotSettings();
 
             InitializeAppOpeningPreferencesSettings();
+
+            InitializeAppClosingPreferencesSettings();
         }
 
         private static void InitializeStatusBarSettings()
@@ -329,47 +347,23 @@
         private static void InitializeSessionSnapshotSettings()
         {
             // We should disable session snapshot feature on multi instances
-            App.OnInstanceTypeChanged += (_, args) =>
-            {
-                var wasSessionSnapshotEnabled = _isSessionSnapshotEnabled;
-
-                _isSessionSnapshotEnabled = IsSessionSnapshotEnabledInternal();
-
-                if (wasSessionSnapshotEnabled != _isSessionSnapshotEnabled)
-                {
-                    if (_isSessionSnapshotEnabled)
-                    {
-                        OnSessionBackupAndRestoreOptionForInstanceChanged?.Invoke(null, _isSessionSnapshotEnabled);
-                    }
-                    else
-                    {
-                        OnSessionBackupAndRestoreOptionChanged?.Invoke(null, _isSessionSnapshotEnabled);
-                    }
-                }
-            };
-
-            _isSessionSnapshotEnabled = IsSessionSnapshotEnabledInternal();
-        }
-
-        private static bool IsSessionSnapshotEnabledInternal()
-        {
             if (!App.IsPrimaryInstance)
             {
-                return false;
+                _isSessionSnapshotEnabled = false;
             }
             else if (App.IsGameBarWidget)
             {
-                return true;
+                _isSessionSnapshotEnabled = true;
             }
             else
             {
                 if (ApplicationSettingsStore.Read(SettingsKey.EditorEnableSessionBackupAndRestoreBool) is bool enableSessionBackupAndRestore)
                 {
-                    return enableSessionBackupAndRestore;
+                    _isSessionSnapshotEnabled = enableSessionBackupAndRestore;
                 }
                 else
                 {
-                    return false;
+                    _isSessionSnapshotEnabled = false;
                 }
             }
         }
@@ -591,6 +585,18 @@
             else
             {
                 _alwaysOpenNewWindow = false;
+            }
+        }
+
+        private static void InitializeAppClosingPreferencesSettings()
+        {
+            if (ApplicationSettingsStore.Read(SettingsKey.ExitWhenLastTabClosed) is bool exitWhenLastTabClosed)
+            {
+                _exitWhenLastTabClosed = exitWhenLastTabClosed;
+            }
+            else
+            {
+                _exitWhenLastTabClosed = false;
             }
         }
     }

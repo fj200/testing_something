@@ -1,4 +1,9 @@
-﻿namespace Notepads.Views.MainPage
+﻿// ---------------------------------------------------------------------------------------------
+//  Copyright (c) 2019-2024, Jiaqi (0x7c13) Liu. All rights reserved.
+//  See LICENSE file in the project root for license information.
+// ---------------------------------------------------------------------------------------------
+
+namespace Notepads.Views.MainPage
 {
     using System;
     using System.Collections.Generic;
@@ -25,7 +30,6 @@
         {
             ShowHideStatusBar(AppSettingsService.ShowStatusBar);
             AppSettingsService.OnStatusBarVisibilityChanged += OnStatusBarVisibilityChanged;
-            App.OnInstanceTypeChanged += (_, args) => UpdateShadowWindowIndicator();
         }
 
         private void SetupStatusBar(ITextEditor textEditor)
@@ -50,7 +54,7 @@
                 {
                     FindName("StatusBar");
                     BuildEncodingIndicatorFlyout();
-                } // Lazy loading   
+                } // Lazy loading
 
                 SetupStatusBar(NotepadsCore.GetSelectedTextEditor());
             }
@@ -99,17 +103,17 @@
             if (StatusBar == null) return;
             PathIndicator.Text = textEditor.EditingFilePath ?? textEditor.FileNamePlaceholder;
 
-            if (textEditor.FileModificationState == FileModificationState.Untouched)
+            switch (textEditor.FileModificationState)
             {
-                ToolTipService.SetToolTip(PathIndicator, PathIndicator.Text);
-            }
-            else if (textEditor.FileModificationState == FileModificationState.Modified)
-            {
-                ToolTipService.SetToolTip(PathIndicator, _resourceLoader.GetString("TextEditor_FileModifiedOutsideIndicator_ToolTip"));
-            }
-            else if (textEditor.FileModificationState == FileModificationState.RenamedMovedOrDeleted)
-            {
-                ToolTipService.SetToolTip(PathIndicator, _resourceLoader.GetString("TextEditor_FileRenamedMovedOrDeletedIndicator_ToolTip"));
+                case FileModificationState.Untouched:
+                    ToolTipService.SetToolTip(PathIndicator, PathIndicator.Text);
+                    break;
+                case FileModificationState.Modified:
+                    ToolTipService.SetToolTip(PathIndicator, _resourceLoader.GetString("TextEditor_FileModifiedOutsideIndicator_ToolTip"));
+                    break;
+                case FileModificationState.RenamedMovedOrDeleted:
+                    ToolTipService.SetToolTip(PathIndicator, _resourceLoader.GetString("TextEditor_FileRenamedMovedOrDeletedIndicator_ToolTip"));
+                    break;
             }
         }
 
@@ -201,7 +205,7 @@
             }
         }
 
-        private async void ReloadFileFromDisk(object sender, RoutedEventArgs e)
+        private async void ReloadFileFromDiskAsync(object sender, RoutedEventArgs e)
         {
             var selectedEditor = NotepadsCore.GetSelectedTextEditor();
 
@@ -210,7 +214,7 @@
             {
                 try
                 {
-                    await selectedEditor.ReloadFromEditingFile();
+                    await selectedEditor.ReloadFromEditingFileAsync();
                     NotificationCenter.Instance.PostNotification(_resourceLoader.GetString("TextEditor_NotificationMsg_FileReloaded"), 1500);
                 }
                 catch (Exception ex)
@@ -244,7 +248,7 @@
             }
         }
 
-        private async void OpenContainingFolder(object sender, RoutedEventArgs e)
+        private async void OpenContainingFolderAsync(object sender, RoutedEventArgs e)
         {
             var selectedEditor = NotepadsCore.GetSelectedTextEditor();
             if (selectedEditor?.EditingFile == null) return;
@@ -593,7 +597,7 @@
 
                 try
                 {
-                    await selectedTextEditor.ReloadFromEditingFile(encoding);
+                    await selectedTextEditor.ReloadFromEditingFileAsync(encoding);
                     NotificationCenter.Instance.PostNotification(_resourceLoader.GetString("TextEditor_NotificationMsg_FileReloaded"), 1500);
                 }
                 catch (Exception ex)
@@ -628,7 +632,7 @@
                 {
                     try
                     {
-                        await selectedTextEditor.ReloadFromEditingFile(encoding);
+                        await selectedTextEditor.ReloadFromEditingFileAsync(encoding);
                         NotificationCenter.Instance.PostNotification(_resourceLoader.GetString("TextEditor_NotificationMsg_FileReloaded"), 1500);
                     }
                     catch (Exception ex)
