@@ -118,7 +118,7 @@ jobs:
 
       - name: Setup MSBuild
         id: setup_msbuild
-        uses: microsoft/setup-msbuild@v1
+        uses: microsoft/setup-msbuild@v3
 
       - name: Checkout repository
         id: checkout_repo
