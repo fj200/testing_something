@@ -237,7 +237,7 @@ jobs:
       - if: matrix.runCodeqlAnalysis
         name: Initialize CodeQL
         id: init_codeql
-        uses: github/codeql-action/init@v1
+        uses: github/codeql-action/init@v4
         with:
           queries: security-and-quality
 
@@ -287,7 +287,7 @@ jobs:
       - if: matrix.runCodeqlAnalysis
         name: Perform CodeQL Analysis
         id: analyze_codeql
-        uses: github/codeql-action/analyze@v1
+        uses: github/codeql-action/analyze@v4
 
       - if: matrix.runSonarCloudScan
         name: Send SonarCloud results
